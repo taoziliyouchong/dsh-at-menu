@@ -1,0 +1,4 @@
+# dsh-at-menu：一个插件行，浏览器半边由 package.json 的 dsh.client 声明发现。
+- insert:
+    - id: dsh-at-menu
+      name: dsh-at-menu

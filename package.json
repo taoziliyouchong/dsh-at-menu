@@ -1,0 +1,65 @@
+{
+  "name": "dsh-at-menu",
+  "version": "0.1.0",
+  "description": "在 @ 引用菜单顶部加一排类别标签，点标签只看该类候选。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./invariant": "./invariant.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "invariant.js",
+    "cordis.patch.yml",
+    "src",
+    "lib/client.js",
+    "scripts",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-0 <0.3.0-0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": []
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "ui",
+    "at-menu",
+    "mention",
+    "reference"
+  ],
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "check:client": "node scripts/build-client.mjs --check",
+    "check": "node --check index.js && node --check invariant.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "author": "taoziliyouchong",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taoziliyouchong/dsh-at-menu"
+  },
+  "homepage": "https://github.com/taoziliyouchong/dsh-at-menu#readme",
+  "bugs": {
+    "url": "https://github.com/taoziliyouchong/dsh-at-menu/issues"
+  }
+}
