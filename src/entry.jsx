@@ -204,6 +204,18 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
       && CATEGORY_SOURCES.includes(highlight.source)) setActive(highlight.source)
   }, [state, active])
 
+  // 内置 ui-reference 启用时，它的 source "reference" 也在这份菜单数据里，本面板不显示那一组。
+  // 高亮一旦落到不显示的组，键盘就会走进看不见的行、回车选中没看见的候选——
+  // 把它推回第一个可见类别的首项。
+  useEffect(() => {
+    if (!state.open) return
+    const highlight = state.highlight
+    if (highlight === null || CATEGORY_SOURCES.includes(highlight.source)) return
+    const first = state.groups.find(group => CATEGORY_SOURCES.includes(group.source)
+      && group.status === 'ready' && group.items.length > 0)
+    if (first !== undefined) onHover(first.source, 0)
+  }, [state])
+
   // 点面板外（且不在输入框里）关闭菜单。
   useEffect(() => {
     if (!state.open) return

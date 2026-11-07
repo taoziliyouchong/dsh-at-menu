@@ -1,6 +1,6 @@
 {
   "name": "dsh-at-menu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "在 @ 引用菜单顶部加一排类别标签，点标签只看该类候选。",
   "type": "module",
   "main": "index.js",
@@ -23,7 +23,7 @@
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
-    "dsh": ">=0.2.2-0 <0.2.3-0"
+    "dsh": ">=0.2.1-0 <=0.2.2-rc.1"
   },
   "dsh": {
     "client": {

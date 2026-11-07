@@ -34,23 +34,21 @@ dsh plugin --profile desktop add dsh-at-menu
 
 Restart DSH afterwards. Replace `desktop` with your own profile name if you use another one.
 
-Requirements: the DSH 0.2.2 line, desktop app or `dsh web` (needs the @ menu of the conversation composer; verified on 0.2.2-rc.1).
-Compatible with DSH 0.2.2-rc.1 (alpha / rc / stable); later versions are untested.
+Requirements: DSH 0.2.1 or later, desktop app or `dsh web` (needs the @ menu of the conversation composer; verified on 0.2.2-rc.1).
+Compatible with DSH 0.2.1-alpha.3 through 0.2.2-rc.1 (the highest version verified locally); later versions are untested.
 
-## Recommended: disable the built-in @ menu
+## Works alongside the built-in @ menu
 
-The built-in reference menu (loader id `ui-reference`) also registers sources named "Workspace files"
-and "Past sessions". Two sources with the same name produce duplicated groups. Disable it in the
-profile's `cordis.patch.yml`:
+Keep the built-in `ui-reference` enabled; the two run together. It owns `source "reference"`, which
+handles two things this plugin does not:
 
-```yaml
-- id: ui-reference
-  disabled: true
-```
+- file reference cards created by dropping files onto the composer (or the add-file button) are turned
+  into text by it — without it, sending fails with
+  `slash: no serializer for reference source "reference"`;
+- the decoration and click-to-open on `@path` mentions in past messages.
 
-What that costs: `@path` mentions in past messages lose their decoration and file references are no
-longer clickable — the text itself stays. Leaving it enabled still works (this plugin hides the
-built-in menu visually); only the candidates are duplicated.
+This panel only takes over the look of the @ menu: the built-in's candidate group is not shown here,
+and the keyboard highlight is pushed back to a visible category when it lands on it.
 
 ## How it works
 
@@ -65,7 +63,7 @@ built-in menu visually); only the candidates are duplicated.
 
 ## Known limits
 
-- With the built-in `ui-reference` enabled, groups with the same name appear twice (see above).
+- With the built-in `ui-reference` enabled, its merged "files + sessions" group is not shown in this panel (the keyboard skips it too); use the built-in menu for that merged view.
 - Tabs only show sources registered in `CATEGORY_SOURCES`; a plugin that registers a new source name
   needs that line in `src/entry.jsx` edited before its tab shows up.
 - This plugin only changes the look and grouping of the @ menu; it does not change the insertion format.
