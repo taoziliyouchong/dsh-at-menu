@@ -7,7 +7,6 @@
  *   2. 组合声明    —— dsh.bundle.patch 指向的文件在，里面的 insert id 等于包名
  *   3. 宿主半边    —— index.js 导出名等于包名，桩 ctx 跑 apply 不抛错
  *   4. 客户端产物  —— 外壳 id == 包名，且带上了源码里的座位与类别标记
- *   5. 伴随插件    —— invariant.js 登记的包名符合约定
  *
  * 用法：node scripts/smoke.mjs   （任一条失败退出码 1）
  */
@@ -29,7 +28,6 @@ const fail = (label, why) => {
 /** 1. 包结构 */
 const REQUIRED = [
   'index.js',
-  'invariant.js',
   'cordis.patch.yml',
   'src/entry.jsx',
   'lib/client.js',
@@ -73,21 +71,8 @@ const idMatch = /^\s*id:\s*"([^"]+)"/m.exec(client)
 if (!idMatch) fail('客户端产物', '外壳里找不到 id')
 else if (idMatch[1] !== pkg.name) fail('客户端产物', '外壳 id 是 ' + idMatch[1] + '，应等于包名 ' + pkg.name)
 else if (!client.includes('conversation.input.overlay')) fail('客户端产物', '产物里没有座位 conversation.input.overlay（源码改了但没重新构建）')
-else if (!client.includes('registerSource')) fail('客户端产物', '产物里没有 registerSource（源码改了但没重新构建）')
 else if (!client.includes('data-dsh-at-open')) fail('客户端产物', '产物里没有内置菜单隐藏标记 data-dsh-at-open')
 else ok('客户端产物', 'id=' + pkg.name + '，' + Buffer.byteLength(client, 'utf8') + ' 字节')
-
-/** 5. 伴随插件 */
-const companion = await import(pathToFileURL(join(root, 'invariant.js')).href)
-if (companion.name !== pkg.name + '-invariant') fail('伴随插件', '导出的 name 是 ' + companion.name + '，应为 ' + pkg.name + '-invariant')
-else if (!Array.isArray(companion.inject) || !companion.inject.includes('invariants')) fail('伴随插件', 'inject 里没有 invariants')
-else {
-  const registered = []
-  const invariantCtx = { invariants: { register: (name) => registered.push(name) } }
-  await companion.apply(invariantCtx)
-  if (registered[0] !== pkg.name) fail('伴随插件', '登记的包名是 ' + registered[0] + '，应为 ' + pkg.name)
-  else ok('伴随插件', '登记 ' + pkg.name)
-}
 
 console.log('')
 if (problems.length > 0) {

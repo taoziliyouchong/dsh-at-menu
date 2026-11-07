@@ -13,7 +13,7 @@ npm run smoke           # 结构 / 组合声明 / 宿主 / 产物 / 伴随插件
 ```
 
 `scripts/smoke.mjs` 不起应用、不发网络请求：核对 `dsh.bundle.patch` 的 id 与 name 等于包名、
-`exports["./client"]` 指向产物、`lib/client.js` 的外壳 id 与座位/类别标记、`invariant.js` 的登记名。
+`exports["./client"]` 指向产物、`lib/client.js` 的外壳 id 与座位/类别标记。
 任一条失败退出码 1。
 
 ## 0.5 检查打包内容
@@ -22,7 +22,7 @@ npm run smoke           # 结构 / 组合声明 / 宿主 / 产物 / 伴随插件
 npm pack --dry-run
 ```
 
-包里只应出现：`index.js`、`invariant.js`、`cordis.patch.yml`、`src/`、`lib/client.js`、`scripts/`、
+包里只应出现：`index.js`、`cordis.patch.yml`、`src/`、`lib/client.js`、`scripts/`、
 两个 README、`LICENSE`。`node_modules/`、`publish/`、`*.tgz` 都不该进包。
 
 **`lib/client.js` 必须提交进 git。** 它不是构建垃圾：从 GitHub 安装时不跑构建，缺了它界面不会加载。

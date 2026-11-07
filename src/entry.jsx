@@ -1,70 +1,23 @@
 /**
- * @ 菜单类别化：只内置官方标准模式里已有的 @ 分类——工作区文件（文件夹并入同一类，
- * 走官方的 Tab 下钻）／历史会话／子代理会话，每个源 = 菜单里独立的一组。技能、插件、
- * 提示词、侧栏引用等类别不由本插件内置：其他插件 registerSource('@') 注册的源出现在
- * 菜单数据里，但不进本插件标签；要显示需在 CATEGORY_SOURCES 登记。
+ * @ 菜单按官方分类显示：不改官方候选、不另造源，只把内置 @ 菜单的外观换成
+ * 「顶部类别标签 + 按官方小节分区」的面板。
  *
- * 面板与内置 MenuView 挂在同一个 list 槽 `conversation.input.overlay` 上；
- * 插件注入一条全局样式把内置菜单（`[data-trigger-menu]`）隐藏，视觉完全由本面板接管。
- * 数据、键盘（上下/回车/Esc）、插入行为仍由内置 controller 拥有：面板只订阅它的
- * menu store 并回投 pick / hover / dismiss。删掉插件那一行即可回到内置菜单。
+ * 分类全部来自官方 `ui-reference` 源本身：它把候选按 `section` 分成
+ * 「文件与文件夹 / 子智能体 / 对话」三段（文案在 ui-reference 的字典里），
+ * 顺序也是官方顺序。本插件不注册任何 `@` 源，第三方源（如常用提示词）照常
+ * 并列显示，小标题用它自己的源名。
  *
- * 引用一律以纯文本落进草稿（`@path ` / `@[label](dsh-session:…)`），宿主侧现有的
- * 文本解析链照旧工作，不依赖内置 ui-reference 的 codec/chip。
+ * 数据、键盘（上下/回车/Esc）、插入行为、面包屑全由内置 controller 拥有：
+ * 面板只订阅它的 menu / headers store，并回投 pick / hover / dismiss。
+ * 删掉插件那一行即可回到内置菜单。
  */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 
-/** 需要的客户端服务：只接标准模式里官方已有的 @ 数据源（文件/会话），
- * 技能、插件、提示词等类别由各自的插件 registerSource('@') 扩展，本插件不内置。 */
-export const inject = [
-  'inputTriggers', 'sessions', 'slots', 'remote', 'remote.fileReferences',
-  'remote.sessionReferenceResolver', 'sidebarRight',
-]
+/** 需要的客户端服务：@ 触发器（菜单数据与键盘都归它）、会话范围、槽。 */
+export const inject = ['inputTriggers', 'sessions', 'slots']
 
-/** 一个路径里取文件名（最后一段）。 */
-function baseName(path) {
-  const slash = path.lastIndexOf('/')
-  return slash < 0 ? path : path.slice(slash + 1)
-}
-
-/** 一个路径的父目录；工作区根目录返回空串。 */
-function parentOf(path) {
-  const slash = path.lastIndexOf('/')
-  return slash < 0 ? '' : path.slice(0, slash)
-}
-
-/** 写进草稿的 @ 形式：含空格的路径加引号。 */
-function fileMention(path, directory) {
-  const text = path.includes(' ') ? `@"${path}"` : `@${path}`
-  return directory && !text.endsWith('/') ? `${text}/` : text
-}
-
-/** 面板只显示本插件注册的类别 + 已知第三方源（提示词货架）；其余源不进标签。 */
-const CATEGORY_SOURCES = ['工作区文件', '历史会话', '子代理会话', '常用提示词']
-
-/** 空文件夹的占位行：空组会让菜单自动关闭，留一行让 @ 界面停在该目录。 */
-const EMPTY_FOLDER = '（此文件夹为空）'
-
-/** 面包屑里「工作区根」的哨兵值；点它回到根列表。 */
-const ROOT_CRUMB = '__dsh_at_root__'
-
-/**
- * 下钻状态下的面包屑：工作区根 + 每一级目录，最后一级标记 current。
- * @param query - 下钻后的查询文本（形如 `src/client/`）。
- * @returns 面包屑；未下钻时为空。
- */
-function folderCrumbs(query) {
-  const path = query.endsWith('/') ? query.slice(0, -1) : query
-  if (path === '') return []
-  const parts = path.split('/').filter(Boolean)
-  const crumbs = [{ label: '工作区', value: ROOT_CRUMB }]
-  let acc = ''
-  for (const part of parts) {
-    acc = acc === '' ? part : `${acc}/${part}`
-    crumbs.push({ label: `${part}/`, value: acc })
-  }
-  return crumbs.map((crumb, index) => index === crumbs.length - 1 ? { ...crumb, current: true } : crumb)
-}
+/** 官方 reference 源的名字（它的候选按 section 分三段）。 */
+const REFERENCE_SOURCE = 'reference'
 
 const S = {
   panel: {
@@ -80,7 +33,6 @@ const S = {
     padding: 4,
     border: '0.5px solid var(--dsw-alias-border-l1, rgba(127,127,127,.25))',
     borderRadius: 10,
-    // 与内置菜单同一层材质：菜单填充色 + 背景模糊，避免正文透过面板。
     background: 'var(--dsw-menu-surface-fill, Canvas)',
     backdropFilter: 'var(--dsw-menu-backdrop-filter, blur(20px))',
     boxShadow: 'var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,.18))',
@@ -114,11 +66,9 @@ const S = {
     flexDirection: 'column',
     minHeight: 0,
     overflowY: 'auto',
-    // 滚动条常驻占位（内容不足时不出现、出现时也不挤动布局），
-    // 避免"数据到了才出滚动条"造成的左右/上下抖动。
     scrollbarGutter: 'stable',
   },
-  groupTitle: {
+  sectionTitle: {
     padding: '6px 8px',
     fontSize: 11,
     lineHeight: '15px',
@@ -182,8 +132,34 @@ function Skeleton() {
 }
 
 /**
- * 菜单面板：顶部类别标签（鼠标点选），下面只列当前类别的候选。
- * @param props - 槽注入的 menu store 与回投函数。
+ * 把 controller 的 groups 摊平成「带原 source / 原 index 的行」，并算上每行的类别。
+ * 类别取行自身的 section（官方 reference 给的就是「文件与文件夹 / 子智能体 / 对话」）；
+ * 没有 section 的源（第三方扩展）用源名。
+ * @param groups - controller 发布的菜单分组。
+ * @returns { label, rows }：标签顺序 = 行里首次出现的顺序。
+ */
+function project(groups) {
+  const rows = []
+  for (const group of groups) {
+    if (group.status !== 'ready') continue
+    for (let index = 0; index < group.items.length; index += 1) {
+      const item = group.items[index]
+      rows.push({
+        source: group.source,
+        index,
+        item,
+        label: item.section === undefined ? group.source : item.section,
+      })
+    }
+  }
+  const labels = []
+  for (const row of rows) if (!labels.includes(row.label)) labels.push(row.label)
+  return { rows, labels }
+}
+
+/**
+ * 菜单面板：顶部类别标签（鼠标点选），下面按类别分节列候选。
+ * @param props - 槽注入的 menu / headers store 与回投函数。
  * @returns 面板；菜单关闭时 null。
  */
 export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss }) {
@@ -193,28 +169,19 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
   const panelRef = useRef(null)
   const listRef = useRef(null)
 
-  // 键盘移动高亮到别的组时，类别跟着切过去；菜单关闭时清空类别。
-  useEffect(() => {
-    if (!state.open) {
-      if (active !== null) setActive(null)
-      return
-    }
-    const highlight = state.highlight
-    if (highlight !== null && active !== null && highlight.source !== active
-      && CATEGORY_SOURCES.includes(highlight.source)) setActive(highlight.source)
-  }, [state, active])
+  const { rows, labels } = project(state.groups)
+  const visible = active === null ? rows : rows.filter(row => row.label === active)
 
-  // 内置 ui-reference 启用时，它的 source "reference" 也在这份菜单数据里，本面板不显示那一组。
-  // 高亮一旦落到不显示的组，键盘就会走进看不见的行、回车选中没看见的候选——
-  // 把它推回第一个可见类别的首项。
+  // 键盘高亮跑到当前筛选看不到的行时，把它推回第一个可见行——否则回车会选中没看见的候选。
   useEffect(() => {
     if (!state.open) return
     const highlight = state.highlight
-    if (highlight === null || CATEGORY_SOURCES.includes(highlight.source)) return
-    const first = state.groups.find(group => CATEGORY_SOURCES.includes(group.source)
-      && group.status === 'ready' && group.items.length > 0)
-    if (first !== undefined) onHover(first.source, 0)
-  }, [state])
+    if (highlight === null) return
+    const shown = visible.some(row => row.source === highlight.source && row.index === highlight.index)
+    if (shown) return
+    const first = visible[0]
+    if (first !== undefined) onHover(first.source, first.index)
+  }, [state, active, visible])
 
   // 点面板外（且不在输入框里）关闭菜单。
   useEffect(() => {
@@ -249,29 +216,36 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
 
   if (!ours) return null
 
-  const groups = state.groups.filter(group => CATEGORY_SOURCES.includes(group.source))
-  const sources = groups.map(group => group.source)
-  // 「全部」模式里空类别整块不渲染（连组标题一起），否则数据返回后空标题消失
-  // 会让面板高度突然收缩、看起来在弹；选中某一类时空组仍在，给出"没有候选"提示。
-  const visible = active === null
-    ? groups.filter(group => !(group.status === 'ready' && group.items.length === 0))
-    : groups.filter(group => group.source === active)
-  // 文件类别下钻时的面包屑（工作区根 → 每一级目录），点上级即可退回。
-  const crumbRows = active !== null ? crumbs.get(active) : undefined
-  const choose = source => {
-    setActive(source)
-    const group = state.groups.find(item => item.source === source)
-    if (group !== undefined && group.status === 'ready' && group.items.length > 0) onHover(source, 0)
+  // 面包屑只由 reference 源在下钻目录时发布。
+  const crumbRows = crumbs.get(REFERENCE_SOURCE)
+  // 官方 reference 源要先 retain 会话、等初次历史打开再问宿主，到得比第三方源晚。
+  // 它还没到时只画骨架——否则会先闪出一屏「只有常用提示词」的菜单再补上。
+  const referenceGroup = state.groups.find(group => group.source === REFERENCE_SOURCE)
+  const referencePending = referenceGroup !== undefined && referenceGroup.status === 'pending'
+  const choose = (label) => {
+    setActive(label)
+    const first = label === null ? null : rows.find(row => row.label === label)
+    if (first !== undefined && first !== null) onHover(first.source, first.index)
+  }
+
+  /** 分节渲染：全部模式下每段一个标题；选中某一类只列该类。 */
+  const sections = []
+  if (visible.length > 0) {
+    for (const row of visible) {
+      const last = sections[sections.length - 1]
+      if (last !== undefined && last.label === row.label) last.rows.push(row)
+      else sections.push({ label: row.label, rows: [row] })
+    }
   }
 
   return (
     <div ref={panelRef} style={S.panel} data-dsh-at-menu="">
-      <div style={S.tabs} role="tablist" aria-label="候选类别">
+      <div style={S.tabs} role="tablist" aria-label="候选类别" hidden={referencePending}>
         <button type="button" role="tab" aria-selected={active === null} style={S.tab(active === null)}
           onMouseDown={ev => { ev.preventDefault(); choose(null) }}>全部</button>
-        {sources.map(source => (
-          <button key={source} type="button" role="tab" aria-selected={active === source} style={S.tab(active === source)}
-            onMouseDown={ev => { ev.preventDefault(); choose(source) }}>{source}</button>
+        {labels.map(label => (
+          <button key={label} type="button" role="tab" aria-selected={active === label} style={S.tab(active === label)}
+            onMouseDown={ev => { ev.preventDefault(); choose(label) }}>{label}</button>
         ))}
       </div>
       {crumbRows !== undefined && crumbRows.length > 0 && (
@@ -279,33 +253,30 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
           {crumbRows.map((crumb, index) => (
             <button key={`${crumb.label}:${index}`} type="button" style={S.crumb}
               disabled={crumb.current === true}
-              onMouseDown={ev => { ev.preventDefault(); if (crumb.current !== true) onCrumb(active, index) }}>{crumb.label}</button>
+              onMouseDown={ev => { ev.preventDefault(); if (crumb.current !== true) onCrumb(REFERENCE_SOURCE, index) }}>{crumb.label}</button>
           ))}
         </div>
       )}
       <div ref={listRef} className="dsh-at-scroll" style={S.viewport} role="listbox" aria-label="触发候选">
-        {visible.map(group => (
-          <div key={group.source}>
-            {active === null && <div style={S.groupTitle}>{group.source}</div>}
-            {group.status === 'ready' && group.items.length === 0 && active !== null
-              ? <div style={S.pending}>这一类没有候选</div>
-              : null}
-            {group.status === 'pending' && group.items.length === 0 && active !== null
-              ? <Skeleton />
-              : null}
-            {group.items.map((item, index) => {
+        {referencePending
+          ? <><Skeleton /><Skeleton /><Skeleton /></>
+          : sections.map(section => (
+          <div key={section.label}>
+            {active === null && <div style={S.sectionTitle}>{section.label}</div>}
+            {section.rows.map(row => {
+              const item = row.item
               const isActive = state.highlight !== null
-                && state.highlight.source === group.source && state.highlight.index === index
+                && state.highlight.source === row.source && state.highlight.index === row.index
               return (
                 <button
-                  key={`${group.source}:${index}`}
+                  key={`${row.source}:${row.index}`}
                   type="button"
                   role="option"
                   aria-selected={isActive}
-                  data-row={`${group.source}:${index}`}
+                  data-row={`${row.source}:${row.index}`}
                   style={S.row(isActive)}
-                  onMouseDown={ev => { ev.preventDefault(); onPick(group.source, index) }}
-                  onMouseMove={isActive ? undefined : () => { onHover(group.source, index) }}
+                  onMouseDown={ev => { ev.preventDefault(); onPick(row.source, row.index) }}
+                  onMouseMove={isActive ? undefined : () => { onHover(row.source, row.index) }}
                 >
                   {typeof item.icon === 'string'
                     ? <span style={S.icon} aria-hidden><RowIcon kind={item.icon} /></span>
@@ -317,159 +288,27 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
                   {item.description !== undefined ? <span style={S.description}>{item.description}</span> : null}
                   {item.drill === true
                     ? <span style={S.drill} role="button" aria-label="进入文件夹"
-                        onMouseDown={ev => { ev.preventDefault(); ev.stopPropagation(); onPick(group.source, index, 'drill') }}>›</span>
+                        onMouseDown={ev => { ev.preventDefault(); ev.stopPropagation(); onPick(row.source, row.index, 'drill') }}>›</span>
                     : null}
                 </button>
               )
             })}
           </div>
         ))}
+        {!referencePending && visible.length === 0 && active !== null
+          ? <div style={S.pending}>这一类没有候选</div>
+          : null}
       </div>
     </div>
   )
 }
 
 /**
- * 注册六个源 + 面板接管菜单外观。
+ * 注册面板并接管 @ 菜单外观（不注册任何源——候选全部来自官方 reference 与其它插件）。
  * @param ctx - 客户端根上下文。
  */
 export function apply(ctx) {
   const sessions = ctx.sessions
-
-  /** 文件候选共用的一次查询，按 kind 分流成两个源。 */
-  async function listFiles(session, query, signal) {
-    const result = await ctx.remote.fileReferences.list(session.sessionId, query, signal)
-    if (!result.ok) return []
-    return result.value
-  }
-
-  /** 会话候选按「自己和子代理」分流。 */
-  async function listSessions(session, query, signal) {
-    const result = await ctx.remote.sessionReferenceResolver.candidates(session.sessionId, query, signal)
-    if (!result.ok) return []
-    const listed = sessions.list.getSnapshot().byId
-    const currentCwd = listed[session.sessionId]?.cwd
-    return result.value.map(candidate => {
-      const summary = listed[candidate.sessionId]
-      const child = summary?.origin === 'subagent' && summary?.parentId === session.sessionId
-      return {
-        child,
-        row: {
-          name: candidate.label,
-          ...(candidate.displayTitle === undefined ? {} : { label: candidate.displayTitle }),
-          ...(summary?.cwd === undefined || summary.cwd === currentCwd ? {} : { description: summary.cwd }),
-          icon: 'session',
-          value: candidate.mention,
-        },
-      }
-    })
-  }
-
-  // 每个源都带 codec：chip 的发送展开就是 ref 原样（官方的 codec 也是 ref => ref）。
-  // 文件类另带 openReference，点 chip 时在侧栏打开文件。
-  const source = (name, order, candidates, onPick, options = {}) => ({
-    trigger: '@',
-    name,
-    order,
-    candidates,
-    onPick,
-    codec: { clipboardText: ref => ref, serialize: ref => Promise.resolve(ref) },
-    ...options,
-  })
-
-  /** 文件引用 chip 的 ref 还原成相对路径。 */
-  function pathOfRef(ref) {
-    const bare = ref.startsWith('@"') ? ref.slice(2, -1) : ref.startsWith('@') ? ref.slice(1) : ref
-    return bare.endsWith('/') ? bare.slice(0, -1) : bare
-  }
-
-  /** 点文件 chip：在侧栏打开该文件（resource 地址与官方 fileAddressFor 同构）。 */
-  function openReference(session, { ref, appearance }) {
-    if (appearance !== 'file' && appearance !== 'folder') return false
-    const path = pathOfRef(ref)
-    if (path === '') return false
-    ctx.sidebarRight.openResource(`dsh-resource://file/session/${session.sessionId}/${path}`)
-    return true
-  }
-
-  const sources = [
-    source('工作区文件', 10, async (session, { query, signal }) => {
-      const files = await listFiles(session, query, signal)
-      if (files.length === 0) {
-        // 下钻进空目录时留一行占位：空组会让菜单自动关闭，用户会以为"被退出"了。
-        const dir = query.endsWith('/') ? query.slice(0, -1) : undefined
-        if (dir !== undefined) return [{ name: EMPTY_FOLDER, description: dir, icon: 'folder', value: dir }]
-        return []
-      }
-      // 文件夹与文件同列一类；文件夹行走官方的下钻方式（Tab / 行尾箭头进入目录）。
-      return files.map(file => file.kind === 'directory'
-        ? {
-          name: `${baseName(file.path)}/`,
-          description: parentOf(file.path) === '' ? undefined : parentOf(file.path),
-          icon: 'folder',
-          value: file.path,
-          drill: true,
-        }
-        : {
-          name: baseName(file.path),
-          description: parentOf(file.path) === '' ? undefined : parentOf(file.path),
-          icon: 'file',
-          value: fileMention(file.path, false),
-        })
-    }, ({ candidate, action }) => {
-      if (candidate.name === EMPTY_FOLDER) {
-        const ref = fileMention(candidate.value, true)
-        return { insert: { source: '工作区文件', ref, label: `${baseName(candidate.value)}/`, appearance: 'folder', clipboardText: ref } }
-      }
-      if (candidate.value === ROOT_CRUMB) return { text: '@', continue: true }
-      // 面包屑点上级：crumb 不带 drill 标记，但动作仍是 drill，落到该目录。
-      if (action === 'drill' && candidate.drill !== true) {
-        return { text: fileMention(candidate.value, true), continue: true }
-      }
-      if (candidate.drill === true) {
-        // 下钻把草稿推进该目录、菜单继续列出内容；落定则引用该文件夹。
-        if (action === 'drill') return { text: fileMention(candidate.value, true), continue: true }
-        const ref = fileMention(candidate.value, true)
-        return { insert: { source: '工作区文件', ref, label: candidate.name, appearance: 'folder', clipboardText: ref } }
-      }
-      // 落定即插引用 chip（appearance 决定图标；ref 原样作为模型文本）。
-      return {
-        insert: {
-          source: '工作区文件',
-          ref: candidate.value,
-          label: candidate.name,
-          appearance: 'file',
-          clipboardText: candidate.value,
-        },
-      }
-    }, { header: (_session, { query }) => folderCrumbs(query), openReference }),
-
-    source('历史会话', 30, async (session, { query, signal }) => {
-      const rows = await listSessions(session, query, signal)
-      return rows.filter(row => !row.child).map(row => row.row)
-    }, ({ candidate }) => ({
-      insert: {
-        source: '历史会话',
-        ref: candidate.value,
-        label: candidate.label ?? candidate.name,
-        appearance: 'session',
-        clipboardText: candidate.value,
-      },
-    })),
-
-    source('子代理会话', 40, async (session, { query, signal }) => {
-      const rows = await listSessions(session, query, signal)
-      return rows.filter(row => row.child).map(row => row.row)
-    }, ({ candidate }) => ({
-      insert: {
-        source: '子代理会话',
-        ref: candidate.value,
-        label: candidate.label ?? candidate.name,
-        appearance: 'session',
-        clipboardText: candidate.value,
-      },
-    })),
-  ]
 
   // 隐藏内置菜单的视觉（数据与键盘仍由它处理），且只在 @ 菜单打开期间隐藏，
   // 这样 `/` 斜杠命令菜单保持内置外观。滚动条与骨架动画照内置菜单的观感补上。
@@ -504,12 +343,5 @@ export function apply(ctx) {
     },
   }, AtMenuPanel))
 
-  ctx.effect(() => {
-    const registry = ctx.inputTriggers
-    const disposers = sources.map(item => registry.registerSource(item))
-    return () => {
-      for (const dispose of disposers.reverse()) dispose()
-      style.remove()
-    }
-  }, 'dsh-at-menu: @ category sources')
+  ctx.effect(() => () => style.remove(), 'dsh-at-menu: styles')
 }
