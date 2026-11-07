@@ -34,8 +34,8 @@ dsh plugin --profile desktop add dsh-at-menu
 
 Restart DSH afterwards. Replace `desktop` with your own profile name if you use another one.
 
-Requirements: the DSH 0.2.1 line, desktop app or `dsh web` (needs the @ menu of the conversation composer).
-Compatible with DSH 0.2.1 (alpha / rc / stable); 0.3 and later are not guaranteed.
+Requirements: the DSH 0.2.2 line, desktop app or `dsh web` (needs the @ menu of the conversation composer; verified on 0.2.2-rc.1).
+Compatible with DSH 0.2.2-rc.1 (alpha / rc / stable); later versions are untested.
 
 ## Recommended: disable the built-in @ menu
 

@@ -32,8 +32,8 @@ dsh plugin --profile desktop add dsh-at-menu
 
 装完重启 DSH。用别的 profile 就把 `desktop` 换成你的 profile 名。
 
-要求：DSH 0.2.1 系列的桌面端或 `dsh web`（需要会话输入框的 @ 菜单）。
-兼容：DSH 0.2.1 系列（alpha / rc / 正式版均可）；0.3 起不保证。
+要求：DSH 0.2.2 系列的桌面端或 `dsh web`（需要会话输入框的 @ 菜单；验证版本 0.2.2-rc.1）。
+兼容：DSH 0.2.2-rc.1 验证通过；更高版本未验证。
 
 ## 建议同时关掉内置的 @ 菜单
 
