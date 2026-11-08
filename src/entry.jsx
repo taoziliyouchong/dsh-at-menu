@@ -131,6 +131,60 @@ function Skeleton() {
   )
 }
 
+/** 插件清单路由。 */
+const PLUGIN_ROUTES = ['/dsh-prompt-shelf/api/plugins']
+/** 清单缓存：同一个菜单里每敲一个字都去问一次路由太吵。 */
+let pluginFeed = { at: 0, items: [] }
+
+/** 读已装插件清单：问插件的本机路由；取不到按空。 */
+async function loadPluginItems() {
+  const now = Date.now()
+  if (now - pluginFeed.at < 2000) return pluginFeed.items
+  let items = []
+  for (const route of PLUGIN_ROUTES) {
+    try {
+      const url = new URL(route.replace(/^\/+/, ''), document.baseURI)
+      const res = await fetch(url.pathname, { headers: { accept: 'application/json' } })
+      if (!res.ok) continue
+      const data = await res.json().catch(() => null)
+      if (data && data.ok === true && Array.isArray(data.items)) { items = data.items; break }
+    } catch {
+      // 这个路由不通就试下一个
+    }
+  }
+  pluginFeed = { at: now, items }
+  return items
+}
+
+/**
+ * 内置 @ 源「插件」：把已装插件列成一个分类，清单与常用提示词窗口里「插件」那一类同一份；
+ * 选中把 `@插件名` 落到光标处。取不到清单时这一类为空。
+ */
+function createPluginSource() {
+  return {
+    trigger: '@',
+    name: '插件',
+    // 10：排在官方 reference 之后、常用提示词（20）之前，与窗口里的类别顺序一致。
+    order: 10,
+    async candidates(_session, req) {
+      const keyword = String(req.query || '').trim().toLowerCase()
+      return (await loadPluginItems())
+        .filter((item) => item && typeof item.name === 'string' && item.name.trim() !== '')
+        .filter((item) => !keyword || item.name.toLowerCase().includes(keyword))
+        .slice(0, 40)
+        .map((item) => ({
+          name: item.name,
+          description: item.kind === 'personal' ? '个人插件' : '插件',
+          value: item.name,
+        }))
+    },
+    onPick(pick) {
+      const name = String(pick.candidate.value || '')
+      return name ? { text: '@' + name } : undefined
+    },
+  }
+}
+
 /**
  * 把 controller 的 groups 摊平成「带原 source / 原 index 的行」，并算上每行的类别。
  * 类别取行自身的 section（官方 reference 给的就是「文件与文件夹 / 子智能体 / 对话」）；
@@ -141,7 +195,9 @@ function Skeleton() {
 function project(groups) {
   const rows = []
   for (const group of groups) {
-    if (group.status !== 'ready') continue
+    // 刷新中的组保留上一批候选（与内置菜单一致：pending 但有旧行就继续显示），
+    // 别让一次重新查询把文件与会话整片清空。
+    if (group.items.length === 0) continue
     for (let index = 0; index < group.items.length; index += 1) {
       const item = group.items[index]
       rows.push({
@@ -168,6 +224,12 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
   const [active, setActive] = useState(null)
   const panelRef = useRef(null)
   const listRef = useRef(null)
+
+  // 菜单关掉时把类别筛选清回「全部」：上一次点过的类别不能带进下一次 @
+  // （面板常驻在 overlay 槽里，状态不清就会一打 @ 就停在上次那一类）。
+  useEffect(() => {
+    if (!state.open) setActive(null)
+  }, [state.open])
 
   const { rows, labels } = project(state.groups)
   const visible = active === null ? rows : rows.filter(row => row.label === active)
@@ -221,7 +283,11 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
   // 官方 reference 源要先 retain 会话、等初次历史打开再问宿主，到得比第三方源晚。
   // 它还没到时只画骨架——否则会先闪出一屏「只有常用提示词」的菜单再补上。
   const referenceGroup = state.groups.find(group => group.source === REFERENCE_SOURCE)
+  // 只在「首次加载、还没有旧行」时用骨架占住列表：刷新期间旧行继续显示，不整片消失。
   const referencePending = referenceGroup !== undefined && referenceGroup.status === 'pending'
+    && referenceGroup.items.length === 0
+  // 这组被 controller 整组丢掉（这次查询失败）时留一句提示，别让「文件与会话」无声消失。
+  const referenceGone = referenceGroup === undefined && state.groups.length > 0
   const choose = (label) => {
     setActive(label)
     const first = label === null ? null : rows.find(row => row.label === label)
@@ -240,14 +306,16 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
 
   return (
     <div ref={panelRef} style={S.panel} data-dsh-at-menu="">
-      <div style={S.tabs} role="tablist" aria-label="候选类别" hidden={referencePending}>
-        <button type="button" role="tab" aria-selected={active === null} style={S.tab(active === null)}
-          onMouseDown={ev => { ev.preventDefault(); choose(null) }}>全部</button>
-        {labels.map(label => (
-          <button key={label} type="button" role="tab" aria-selected={active === label} style={S.tab(active === label)}
-            onMouseDown={ev => { ev.preventDefault(); choose(label) }}>{label}</button>
-        ))}
-      </div>
+      {!referencePending && (
+        <div style={S.tabs} role="tablist" aria-label="候选类别">
+          <button type="button" role="tab" aria-selected={active === null} style={S.tab(active === null)}
+            onMouseDown={ev => { ev.preventDefault(); choose(null) }}>全部</button>
+          {labels.map(label => (
+            <button key={label} type="button" role="tab" aria-selected={active === label} style={S.tab(active === label)}
+              onMouseDown={ev => { ev.preventDefault(); choose(label) }}>{label}</button>
+          ))}
+        </div>
+      )}
       {crumbRows !== undefined && crumbRows.length > 0 && (
         <div style={S.crumbs} role="navigation" aria-label="目录导航">
           {crumbRows.map((crumb, index) => (
@@ -298,6 +366,9 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
         {!referencePending && visible.length === 0 && active !== null
           ? <div style={S.pending}>这一类没有候选</div>
           : null}
+        {referenceGone && !referencePending
+          ? <div style={S.pending}>文件与会话这次没加载出来——Esc 关掉重开一次 @ 会对它重试</div>
+          : null}
       </div>
     </div>
   )
@@ -344,4 +415,15 @@ export function apply(ctx) {
   }, AtMenuPanel))
 
   ctx.effect(() => () => style.remove(), 'dsh-at-menu: styles')
+
+  // 内置「插件」分类：清单取自常用提示词插件的本机路由（与窗口里「插件」那一类同一份），
+  // 不依赖别的插件往 @ 里注册源；取不到清单时这一类自然为空。
+  ctx.effect(() => {
+    try {
+      return ctx.inputTriggers.registerSource(createPluginSource())
+    } catch (error) {
+      console.warn('[dsh-at-menu] 插件分类注册失败（同名源已被占用）', error)
+      return () => {}
+    }
+  }, 'dsh-at-menu: 插件 source')
 }

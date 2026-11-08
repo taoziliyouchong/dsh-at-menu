@@ -7,18 +7,14 @@ that category instead of scrolling through one mixed list.
 
 ## Categories
 
-Only the three kinds the DSH conversation UI already has data for are built in:
-
 | Category | Source |
 | --- | --- |
-| Workspace files | The workspace file-reference API; files and folders share one category, and a folder row drills into the directory with the trailing arrow (or Tab), with breadcrumbs to go back up |
-| Past sessions | Plain sessions from the session-reference candidates |
-| Subagent sessions | The rows marked as subagents in the same candidate list |
+| Files and folders | The built-in `ui-reference` @ candidates (host file-reference API); a folder row drills into the directory with the trailing arrow or Tab, with breadcrumbs to go back up |
+| Subagents | The built-in `ui-reference` @ candidates (the current session's subagents) |
+| Sessions | The built-in `ui-reference` @ candidates (the other past sessions) |
+| Plugins | Built in: reads the prompt-shelf plugin's plugin-list route `/dsh-prompt-shelf/api/plugins` (`dsh-prompt-shelf`), the same list as the "Plugins" option in the prompt-shelf window; the category is absent when that plugin is not installed |
 
-Skills, plugins, saved prompts, sidebar references and so on are **not** built in: each plugin
-registers its own source through
-`ctx.inputTriggers.registerSource({ trigger: '@', name: 'name', candidates, onPick })`,
-and the panel turns every registered source into a tab — `name` is the tab label.
+Other plugins' registered `@` sources still appear side by side as tabs — `name` is the tab label.
 
 ## Install
 
@@ -35,7 +31,7 @@ dsh plugin --profile desktop add dsh-at-menu
 Restart DSH afterwards. Replace `desktop` with your own profile name if you use another one.
 
 Requirements: DSH 0.2.1 or later, desktop app or `dsh web` (needs the @ menu of the conversation composer; verified on 0.2.2-rc.1).
-Requires DSH >= 0.2.1-alpha.3; verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
+Requires DSH >= 0.2.1-alpha.1 (lower bound inferred from the services and slots the plugin uses, all present in alpha.1); verified on 0.2.1-alpha.3 and 0.2.2-rc.1, later versions untested.
 
 ## Works alongside the built-in @ menu
 
@@ -63,10 +59,11 @@ and the keyboard highlight is pushed back to a visible category when it lands on
 
 ## Known limits
 
-- With the built-in `ui-reference` enabled, its merged "files + sessions" group is not shown in this panel (the keyboard skips it too); use the built-in menu for that merged view.
-- Tabs only show sources registered in `CATEGORY_SOURCES`; a plugin that registers a new source name
-  needs that line in `src/entry.jsx` edited before its tab shows up.
-- This plugin only changes the look and grouping of the @ menu; it does not change the insertion format.
+- Tabs are derived from the categories present in the candidates, so a category with no rows shows no tab;
+  when the built-in reference query fails, its group is dropped for that menu (the panel leaves a note at the
+  bottom, and reopening the menu retries).
+- This plugin only changes the look and grouping of the @ menu; the insertion format stays with each source
+  (saved prompts and file references are plain text).
 
 ## Development
 
