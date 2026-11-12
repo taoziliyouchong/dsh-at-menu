@@ -10,6 +10,9 @@
  * 数据、键盘（上下/回车/Esc）、插入行为、面包屑全由内置 controller 拥有：
  * 面板只订阅它的 menu / headers store，并回投 pick / hover / dismiss。
  * 删掉插件那一行即可回到内置菜单。
+ *
+ * 滚动位置按目录记：打开菜单时根目录回顶、进过的文件夹回原位；下钻与点面包屑
+ * 返回各回各的位置，不再把上一层的偏移带进下一层。
  */
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 
@@ -214,6 +217,29 @@ function project(groups) {
 }
 
 /**
+ * 视口顶端往下第一行（按 data-row 解回 source / index），没有行时 null。
+ * 恢复滚动位置后用它把高亮停到眼前那一行，免得回车选中看不见的候选。
+ * @param list - 滚动视口。
+ * @returns 行身份，或 null。
+ */
+function rowAtViewportTop(list) {
+  const rows = list.querySelectorAll('[data-row]')
+  if (rows.length === 0) return null
+  const top = list.getBoundingClientRect().top
+  let picked = rows[rows.length - 1]
+  for (const el of rows) {
+    if (el.getBoundingClientRect().top < top - 1) continue
+    picked = el
+    break
+  }
+  const key = picked.getAttribute('data-row')
+  if (key === null) return null
+  const split = key.lastIndexOf(':')
+  const index = Number(key.slice(split + 1))
+  return Number.isInteger(index) ? { source: key.slice(0, split), index } : null
+}
+
+/**
  * 菜单面板：顶部类别标签（鼠标点选），下面按类别分节列候选。
  * @param props - 槽注入的 menu / headers store 与回投函数。
  * @returns 面板；菜单关闭时 null。
@@ -224,6 +250,14 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
   const [active, setActive] = useState(null)
   const panelRef = useRef(null)
   const listRef = useRef(null)
+  /** 每个目录上次停下的滚动位置：key 是 @ 后的目录路径（含末尾斜杠），根目录为 ''。 */
+  const scrollMemory = useRef(new Map())
+  /** 当前列表实际展示的目录 key（换目录时等恢复那一刻才更新）。 */
+  const shownPath = useRef('')
+  /** 待恢复的目录位置：菜单打开或换目录时挂上，等新候选到齐再落。 */
+  const restore = useRef(null)
+  const prevOpen = useRef(false)
+  const prevPath = useRef('')
 
   // 菜单关掉时把类别筛选清回「全部」：上一次点过的类别不能带进下一次 @
   // （面板常驻在 overlay 槽里，状态不清就会一打 @ 就停在上次那一类）。
@@ -267,6 +301,14 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
       ?.scrollIntoView({ block: 'nearest' })
   }, [state])
 
+  // 官方 reference 源要先 retain 会话、等初次历史打开再问宿主，到得比第三方源晚。
+  const referenceGroup = state.groups.find(group => group.source === REFERENCE_SOURCE)
+  // 只在「首次加载、还没有旧行」时用骨架占住列表：刷新期间旧行继续显示，不整片消失。
+  const referencePending = referenceGroup !== undefined && referenceGroup.status === 'pending'
+    && referenceGroup.items.length === 0
+  // 这组被 controller 整组丢掉（这次查询失败）时留一句提示，别让「文件与会话」无声消失。
+  const referenceGone = referenceGroup === undefined && state.groups.length > 0
+
   // 只有 @ 菜单由本面板接管；`/` 菜单保持内置外观。
   // 用 layout effect：面板挂上与前一刻画出内置菜单在同一帧内切换，避免闪一下。
   const ours = state.open && state.hit !== null && state.hit.trigger === '@'
@@ -276,18 +318,60 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
     return () => { document.body.removeAttribute('data-dsh-at-open') }
   }, [ours])
 
+  // 列表所在的目录：@ 后路径截到最后一个斜杠（含），根目录为 ''。
+  // 下钻与点面包屑返回都只改 query：菜单不关、列表沿用同一个滚动容器。不记位置的话，
+  // 上一层滑到哪儿下一层就从哪儿开始（点进靠下的文件夹会直接落到最底下）。
+  const pathKey = (() => {
+    const hit = state.hit
+    if (hit === null) return ''
+    const query = hit.query
+    const slash = query.lastIndexOf('/')
+    return slash < 0 ? '' : query.slice(0, slash + 1)
+  })()
+
+  // 什么时候该定位：菜单刚打开（根目录回顶、进过的文件夹回原位），或菜单内换了目录
+  // （下钻 / 点面包屑返回，回到该目录上次的位置；第一次进入从顶部开始）。
+  useEffect(() => {
+    if (!ours) {
+      prevOpen.current = false
+      prevPath.current = pathKey
+      restore.current = null
+      return
+    }
+    if (!prevOpen.current) {
+      prevOpen.current = true
+      prevPath.current = pathKey
+      const saved = pathKey === '' ? 0 : scrollMemory.current.get(pathKey)
+      restore.current = { key: pathKey, top: saved ?? 0 }
+      return
+    }
+    if (prevPath.current !== pathKey) {
+      prevPath.current = pathKey
+      restore.current = { key: pathKey, top: scrollMemory.current.get(pathKey) ?? 0 }
+    }
+  }, [ours, pathKey])
+
+  // 落位置。顺序排在「高亮滚进视野」之后：同一次提交里后写生效，旧高亮不会把列表拽走；
+  // 落完把高亮停到视口第一行，回车选中的就是眼前这一行。
+  useEffect(() => {
+    const pending = restore.current
+    if (!ours || pending === null) return
+    // 新目录的候选没到齐时先不动，否则会按上一目录的行高算位置。
+    if (referenceGroup !== undefined && referenceGroup.status === 'pending') return
+    const list = listRef.current
+    if (list === null || visible.length === 0) return
+    restore.current = null
+    shownPath.current = pending.key
+    list.scrollTop = pending.top
+    scrollMemory.current.set(pending.key, list.scrollTop)
+    const row = rowAtViewportTop(list)
+    if (row !== null) onHover(row.source, row.index)
+  }, [ours, pathKey, referenceGroup, visible, onHover])
+
   if (!ours) return null
 
   // 面包屑只由 reference 源在下钻目录时发布。
   const crumbRows = crumbs.get(REFERENCE_SOURCE)
-  // 官方 reference 源要先 retain 会话、等初次历史打开再问宿主，到得比第三方源晚。
-  // 它还没到时只画骨架——否则会先闪出一屏「只有常用提示词」的菜单再补上。
-  const referenceGroup = state.groups.find(group => group.source === REFERENCE_SOURCE)
-  // 只在「首次加载、还没有旧行」时用骨架占住列表：刷新期间旧行继续显示，不整片消失。
-  const referencePending = referenceGroup !== undefined && referenceGroup.status === 'pending'
-    && referenceGroup.items.length === 0
-  // 这组被 controller 整组丢掉（这次查询失败）时留一句提示，别让「文件与会话」无声消失。
-  const referenceGone = referenceGroup === undefined && state.groups.length > 0
   const choose = (label) => {
     setActive(label)
     const first = label === null ? null : rows.find(row => row.label === label)
@@ -325,7 +409,12 @@ export function AtMenuPanel({ menu, headers, onPick, onCrumb, onHover, onDismiss
           ))}
         </div>
       )}
-      <div ref={listRef} className="dsh-at-scroll" style={S.viewport} role="listbox" aria-label="触发候选">
+      <div ref={listRef} className="dsh-at-scroll" style={S.viewport} role="listbox" aria-label="触发候选"
+        onScroll={() => {
+          // 随滚随记：换目录 / 关菜单时不必再赶在 DOM 卸载前取一次。
+          const list = listRef.current
+          if (list !== null) scrollMemory.current.set(shownPath.current, list.scrollTop)
+        }}>
         {referencePending
           ? <><Skeleton /><Skeleton /><Skeleton /></>
           : sections.map(section => (
